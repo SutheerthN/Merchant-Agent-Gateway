@@ -126,6 +126,24 @@ type PaymentFlowState =
   | 'PAYMENT_SUCCESS'
   | 'PAYMENT_FAILED';
 
+async function computeHmacSha256(message: string, secret: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(secret);
+  const messageData = encoder.encode(message);
+
+  const cryptoKey = await window.crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const signatureBuffer = await window.crypto.subtle.sign('HMAC', cryptoKey, messageData);
+  const hashArray = Array.from(new Uint8Array(signatureBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export default function App() {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [manifest, setManifest] = useState<ManifestData | null>(null);
@@ -145,6 +163,7 @@ export default function App() {
   const [catalogLoading, setCatalogLoading] = useState<boolean>(true);
 
   const timelineEndRef = useRef<HTMLDivElement>(null);
+  const paymentHandledRef = useRef<boolean>(false);
 
   useEffect(() => {
     async function loadInitialData() {
@@ -185,6 +204,7 @@ export default function App() {
 
   const resetDemoState = () => {
     const newSessionId = `sess_demo_${Date.now()}`;
+    paymentHandledRef.current = false;
     setCurrentSessionId(newSessionId);
     setMessages([
       {
@@ -225,6 +245,7 @@ export default function App() {
   const sendUserMessage = async (text: string) => {
     if (!text.trim() || agentLoading) return;
 
+    paymentHandledRef.current = false;
     const userMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
       sender: 'user',
@@ -300,6 +321,7 @@ export default function App() {
   const handleCreateRazorpayOrder = async () => {
     if (!policyDecision || policyDecision.status !== 'ALLOW') return;
 
+    paymentHandledRef.current = false;
     setPaymentFlowState('CREATING_ORDER');
     try {
       const res = await fetch('/api/payment/create_order', {
@@ -329,11 +351,18 @@ export default function App() {
   const handleLaunchCheckout = () => {
     if (!razorpayOrder) return;
 
-    if (typeof window.Razorpay === 'undefined') {
+    const isPlaceholderKey =
+      !razorpayOrder.keyId ||
+      razorpayOrder.keyId === 'rzp_test_placeholder_key_id' ||
+      razorpayOrder.keyId.includes('placeholder');
+
+    if (typeof window.Razorpay === 'undefined' || isPlaceholderKey) {
+      // In placeholder test mode (without dashboard keys), verify via server HMAC verification simulator
       simulatePaymentSuccess();
       return;
     }
 
+    paymentHandledRef.current = false;
     setPaymentFlowState('CHECKOUT_OPEN');
 
     const options = {
@@ -344,6 +373,7 @@ export default function App() {
       description: 'Merchant Agent Gateway — Test Mode Checkout',
       order_id: razorpayOrder.orderId,
       handler: async function (response: any) {
+        paymentHandledRef.current = true;
         setPaymentFlowState('VERIFYING');
         try {
           const verifyRes = await fetch('/api/payment/verify', {
@@ -374,7 +404,8 @@ export default function App() {
       },
       modal: {
         ondismiss: function () {
-          if (paymentFlowState === 'CHECKOUT_OPEN') {
+          if (!paymentHandledRef.current) {
+            paymentHandledRef.current = true;
             handleSimulateFailure('Customer dismissed checkout modal');
           }
         },
@@ -391,6 +422,7 @@ export default function App() {
 
     const rzp = new window.Razorpay(options);
     rzp.on('payment.failed', function (response: any) {
+      paymentHandledRef.current = true;
       handleSimulateFailure(response.error?.description || 'Test payment declined');
     });
     rzp.open();
@@ -398,20 +430,43 @@ export default function App() {
 
   const simulatePaymentSuccess = async () => {
     if (!razorpayOrder) return;
+    paymentHandledRef.current = true;
     setPaymentFlowState('VERIFYING');
-    setTimeout(async () => {
-      setPaymentFlowState('PAYMENT_SUCCESS');
-      setPaymentResultDetails({
-        status: 'PAYMENT_SUCCESS',
-        paymentId: `pay_test_${Date.now()}`,
-        orderId: razorpayOrder.orderId,
-        verified: true,
-      });
+
+    try {
+      const mockPaymentId = `pay_test_${Date.now()}`;
+      const payloadToSign = `${razorpayOrder.orderId}|${mockPaymentId}`;
+      const signature = await computeHmacSha256(payloadToSign, 'placeholder_key_secret');
+
+      const verifyRes = await fetch('/api/payment/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: currentSessionId,
+          razorpay_payment_id: mockPaymentId,
+          razorpay_order_id: razorpayOrder.orderId,
+          razorpay_signature: signature,
+          decisionId: razorpayOrder.decisionId,
+          auditEventId: razorpayOrder.auditEventId,
+        }),
+      }).then((r) => r.json());
+
+      if (verifyRes.status === 'success' && verifyRes.data.verified) {
+        setPaymentFlowState('PAYMENT_SUCCESS');
+        setPaymentResultDetails(verifyRes.data);
+      } else {
+        setPaymentFlowState('PAYMENT_FAILED');
+        setPaymentResultDetails(verifyRes.data);
+      }
       await loadAuditData(currentSessionId);
-    }, 600);
+    } catch (err: any) {
+      setPaymentFlowState('PAYMENT_FAILED');
+      setPaymentResultDetails({ reason: err.message });
+    }
   };
 
   const handleSimulateFailure = async (customReason?: string) => {
+    paymentHandledRef.current = true;
     setPaymentFlowState('VERIFYING');
     try {
       const res = await fetch('/api/payment/report_failure', {
