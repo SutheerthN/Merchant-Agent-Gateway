@@ -87,9 +87,9 @@ In `src/server/catalog/products.ts`, SKU `SKU-ADV-999` contains simulated advers
 ## 🗺️ Project Milestones
 
 - [x] **Milestone 1**: Project Initialization, Machine-Readable Capabilities, Zod Validation, Mock Catalog, Health Endpoint & Dashboard.
-- [ ] **Milestone 2**: Deterministic Policy Engine (Spend limit, Currency, Category, Stock & Delivery constraints).
-- [ ] **Milestone 3**: Server-side Razorpay Test Mode integration (Order creation, Checkout verification, Test failure simulation).
-- [ ] **Milestone 4**: Agent Reasoning Orchestration Loop & Live SSE Streaming.
-- [ ] **Milestone 5**: Cryptographic Audit Trail with chained event hashes.
-- [ ] **Milestone 6**: High-impact interactive UI with 1-Click Demo Scenarios (Happy Path, Prompt Injection Defense, Payment Failure Recovery).
-- [ ] **Milestone 7**: End-to-end verification, automated tests, and presentation walkthrough.
+- [x] **Milestone 2**: Deterministic Policy Engine (Spend limit, Currency, Category, Stock & Delivery constraints).
+- [x] **Milestone 3**: Server-side Razorpay Test Mode integration (Order creation, Checkout verification, Test failure simulation).
+- [x] **Milestone 4**: Agent Reasoning Orchestration Loop & Live SSE Streaming.
+- [x] **Milestone 5**: Cryptographic Audit Trail with chained event hashes.
+- [x] **Milestone 6**: High-impact interactive UI with 1-Click Demo Scenarios (Happy Path, Prompt Injection Defense, Payment Failure Recovery).
+- [x] **Milestone 7**: End-to-end verification, automated tests, and presentation walkthrough.
