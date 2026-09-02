@@ -80,6 +80,25 @@ interface AgentEvent {
   data?: any;
 }
 
+interface AuditRecord {
+  id: string;
+  timestamp: string;
+  sessionId: string;
+  transactionId?: string;
+  eventType: string;
+  actor: string;
+  data: Record<string, any>;
+  previousHash: string;
+  hash: string;
+}
+
+interface ChainVerificationResult {
+  valid: boolean;
+  eventCount: number;
+  firstInvalidEventId: string | null;
+  reason?: string;
+}
+
 interface ChatMessage {
   id: string;
   sender: 'user' | 'agent' | 'system';
@@ -113,6 +132,10 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState<string>('');
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [auditRecords, setAuditRecords] = useState<AuditRecord[]>([]);
+  const [chainVerification, setChainVerification] = useState<ChainVerificationResult | null>(null);
+  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
   const [policyDecision, setPolicyDecision] = useState<PolicyDecisionData | null>(null);
   const [razorpayOrder, setRazorpayOrder] = useState<RazorpayOrderData | null>(null);
   const [paymentFlowState, setPaymentFlowState] = useState<PaymentFlowState>('IDLE');
@@ -144,7 +167,6 @@ export default function App() {
           setProducts(catalogRes.data.products);
         }
 
-        // Welcome message
         setMessages([
           {
             id: 'msg_welcome',
@@ -167,6 +189,25 @@ export default function App() {
     timelineEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [agentEvents]);
 
+  const loadAuditData = async (sessId: string) => {
+    if (!sessId) return;
+    try {
+      const [recordsRes, verifyRes] = await Promise.all([
+        fetch(`/api/audit/session/${sessId}`).then((r) => r.json()),
+        fetch(`/api/audit/verify/${sessId}`).then((r) => r.json()),
+      ]);
+
+      if (recordsRes.status === 'success') {
+        setAuditRecords(recordsRes.data.events || []);
+      }
+      if (verifyRes.status === 'success') {
+        setChainVerification(verifyRes.data);
+      }
+    } catch (err) {
+      console.error('Error loading audit records:', err);
+    }
+  };
+
   const sendUserMessage = async (text: string) => {
     if (!text.trim() || agentLoading) return;
 
@@ -184,6 +225,10 @@ export default function App() {
     setRazorpayOrder(null);
     setPaymentFlowState('IDLE');
     setPaymentResultDetails(null);
+    setChainVerification(null);
+
+    const sessionId = `sess_${Date.now()}`;
+    setCurrentSessionId(sessionId);
 
     try {
       const res = await fetch('/api/agent/chat', {
@@ -191,8 +236,9 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
+          sessionId,
           userAuth: {
-            maxSpendInPaise: 300000, // ₹3,000 default limit
+            maxSpendInPaise: 300000,
             maxDeliveryDays: 3,
           },
         }),
@@ -213,6 +259,7 @@ export default function App() {
           timestamp: new Date().toLocaleTimeString(),
         };
         setMessages((prev) => [...prev, agentReply]);
+        await loadAuditData(sessionId);
       } else {
         const errorReply: ChatMessage = {
           id: `err_${Date.now()}`,
@@ -246,6 +293,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sessionId: currentSessionId,
           items: policyDecision.proposal.items,
           userAuth: policyDecision.userPolicy,
         }),
@@ -254,6 +302,7 @@ export default function App() {
       if (res.status === 'success') {
         setRazorpayOrder(res.data.order);
         setPaymentFlowState('READY_FOR_CHECKOUT');
+        await loadAuditData(currentSessionId);
       } else {
         alert(`Order creation failed: ${res.message || 'Policy Blocked'}`);
         setPaymentFlowState('IDLE');
@@ -288,6 +337,7 @@ export default function App() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              sessionId: currentSessionId,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_order_id: response.razorpay_order_id,
               razorpay_signature: response.razorpay_signature,
@@ -303,6 +353,7 @@ export default function App() {
             setPaymentFlowState('PAYMENT_FAILED');
             setPaymentResultDetails(verifyRes.data);
           }
+          await loadAuditData(currentSessionId);
         } catch (err: any) {
           setPaymentFlowState('PAYMENT_FAILED');
           setPaymentResultDetails({ reason: err.message });
@@ -335,7 +386,7 @@ export default function App() {
   const simulatePaymentSuccess = async () => {
     if (!razorpayOrder) return;
     setPaymentFlowState('VERIFYING');
-    setTimeout(() => {
+    setTimeout(async () => {
       setPaymentFlowState('PAYMENT_SUCCESS');
       setPaymentResultDetails({
         status: 'PAYMENT_SUCCESS',
@@ -343,6 +394,7 @@ export default function App() {
         orderId: razorpayOrder.orderId,
         verified: true,
       });
+      await loadAuditData(currentSessionId);
     }, 600);
   };
 
@@ -353,6 +405,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          sessionId: currentSessionId,
           razorpay_order_id: razorpayOrder?.orderId || 'order_test_simulated',
           error_code: 'BAD_REQUEST_ERROR',
           error_description: customReason || 'Simulated deliberate payment rejection by test bank simulator.',
@@ -363,6 +416,7 @@ export default function App() {
 
       setPaymentFlowState('PAYMENT_FAILED');
       setPaymentResultDetails(res.data);
+      await loadAuditData(currentSessionId);
     } catch (err: any) {
       setPaymentFlowState('PAYMENT_FAILED');
       setPaymentResultDetails({ errorDescription: err.message });
@@ -396,7 +450,7 @@ export default function App() {
             AI BUYER ONLINE ({health?.service || 'MAG'})
           </span>
           <span className="badge badge-live">
-            POLICY ENGINE: 10 RULES (v{manifest?.gatewayVersion || '0.1.0'})
+            SHA-256 AUDIT CHAIN ACTIVE (v{manifest?.gatewayVersion || '0.1.0'})
           </span>
           <span className="badge badge-pending">
             RAZORPAY TEST MODE
@@ -592,6 +646,94 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* Cryptographic Tamper-Evident Audit Trail Section */}
+      {auditRecords.length > 0 && (
+        <section className="tester-panel" style={{ border: '1px solid rgba(16, 185, 129, 0.3)', background: '#090d16', marginBottom: '40px' }}>
+          <div className="panel-header" style={{ borderBottomColor: 'rgba(255, 255, 255, 0.1)' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="badge badge-live" style={{ background: 'rgba(16, 185, 129, 0.2)', color: '#34d399' }}>
+                  🔗 SHA-256 HASH CHAIN
+                </span>
+                <h3 className="section-title" style={{ fontSize: '18px' }}>
+                  Tamper-Evident Audit Trail
+                </h3>
+              </div>
+              <p className="section-description" style={{ marginTop: '2px' }}>
+                Cryptographically linked event chain proving end-to-end transaction integrity.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => loadAuditData(currentSessionId)}
+                style={{ fontSize: '12px', padding: '6px 12px' }}
+              >
+                🔄 Verify Chain
+              </button>
+              {chainVerification && (
+                <span
+                  className={`badge ${chainVerification.valid ? 'badge-live' : 'badge-demo'}`}
+                  style={{
+                    background: chainVerification.valid ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.25)',
+                    color: chainVerification.valid ? '#6ee7b7' : '#fda4af',
+                    borderColor: chainVerification.valid ? '#10b981' : '#f43f5e',
+                    fontSize: '12px',
+                    padding: '6px 12px',
+                  }}
+                >
+                  {chainVerification.valid
+                    ? `✓ CHAIN VALID (${chainVerification.eventCount} Events)`
+                    : `✕ TAMPERED (Event: ${chainVerification.firstInvalidEventId?.substring(0, 14)}...)`}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Audit Chain List */}
+          <div className="audit-events-list">
+            {auditRecords.map((record, index) => (
+              <div key={record.id} className="audit-record-card">
+                <div
+                  className="audit-record-header"
+                  onClick={() => setExpandedAuditId(expandedAuditId === record.id ? null : record.id)}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span className="audit-seq">#{index + 1}</span>
+                    <span className="audit-type-pill">{record.eventType}</span>
+                    <span className="audit-actor">Actor: <strong>{record.actor}</strong></span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span className="audit-hash-code">
+                      Prev: {record.previousHash === 'GENESIS' ? 'GENESIS' : `${record.previousHash.substring(0, 8)}...`}
+                    </span>
+                    <span className="audit-hash-code" style={{ color: '#818cf8' }}>
+                      Hash: {record.hash.substring(0, 8)}...
+                    </span>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {expandedAuditId === record.id ? '▼' : '▶'}
+                    </span>
+                  </div>
+                </div>
+
+                {expandedAuditId === record.id && (
+                  <div className="audit-record-body">
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                      ID: <code>{record.id}</code> | Timestamp: <code>{record.timestamp}</code>
+                    </div>
+                    <pre className="code-output" style={{ maxHeight: '180px', margin: 0 }}>
+                      {JSON.stringify(record.data, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Merchant Product Catalog */}
       <section style={{ marginTop: '40px' }}>

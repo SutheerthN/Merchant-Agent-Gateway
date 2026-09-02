@@ -5,6 +5,7 @@ import { capabilitiesRouter } from './routes/capabilities.js';
 import { healthRouter } from './routes/health.js';
 import { paymentRouter } from './routes/payment.js';
 import { agentRouter } from './routes/agent.js';
+import { auditRouter } from './routes/audit.js';
 
 export function createApp() {
   const app = express();
@@ -17,6 +18,7 @@ export function createApp() {
   app.use('/api/capabilities', capabilitiesRouter);
   app.use('/api/payment', paymentRouter);
   app.use('/api/agent', agentRouter);
+  app.use('/api/audit', auditRouter);
 
   // Global Zod & Error Handler
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

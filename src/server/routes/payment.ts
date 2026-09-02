@@ -6,6 +6,7 @@ import { PaymentExecutor } from '../payment/boundary.js';
 import { RazorpayOrderService } from '../payment/razorpay/orders.js';
 import { RazorpayVerificationService } from '../payment/razorpay/verification.js';
 import { PurchaseProposal } from '../types/policy.js';
+import { AuditService } from '../audit/audit.service.js';
 
 export const paymentRouter = Router();
 
@@ -15,6 +16,7 @@ const VerifyPaymentSchema = z.object({
   razorpay_signature: z.string().min(1, 'Signature is required'),
   decisionId: z.string().optional(),
   auditEventId: z.string().optional(),
+  sessionId: z.string().optional(),
 });
 
 const ReportFailureSchema = z.object({
@@ -27,6 +29,7 @@ const ReportFailureSchema = z.object({
   error_step: z.string().optional(),
   decisionId: z.string().optional(),
   auditEventId: z.string().optional(),
+  sessionId: z.string().optional(),
 });
 
 /**
@@ -42,6 +45,7 @@ const ReportFailureSchema = z.object({
 paymentRouter.post('/create_order', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const validated = ValidatePolicySchema.parse(req.body);
+    const auditService = AuditService.getInstance();
 
     const proposal: PurchaseProposal = {
       merchantId: validated.merchantId || 'merchant_aero_gear_in',
@@ -56,6 +60,17 @@ paymentRouter.post('/create_order', async (req: Request, res: Response, next: Ne
 
     // 2. Enforce Boundary: Rejection if status is not ALLOW
     if (decision.status !== 'ALLOW') {
+      auditService.appendEvent({
+        sessionId: proposal.sessionId,
+        eventType: 'POLICY_BLOCKED',
+        actor: 'DETERMINISTIC_POLICY_ENGINE',
+        data: {
+          decisionId: decision.decisionId,
+          reasons: decision.violationReasons,
+          totalInPaise: decision.trustedTransaction.finalTotalInPaise,
+        },
+      });
+
       res.status(403).json({
         status: 'error',
         errorType: 'POLICY_BLOCKED',
@@ -65,11 +80,34 @@ paymentRouter.post('/create_order', async (req: Request, res: Response, next: Ne
       return;
     }
 
-    // 3. Guaranteed ALLOW: Type-safe payload construction
+    // 3. Guaranteed ALLOW: Record payment boundary reached
+    auditService.appendEvent({
+      sessionId: proposal.sessionId,
+      eventType: 'PAYMENT_BOUNDARY_REACHED',
+      actor: 'RAZORPAY_GATEWAY',
+      data: {
+        decisionId: decision.decisionId,
+        authorizedTotalInPaise: decision.trustedTransaction.finalTotalInPaise,
+      },
+    });
+
     const authorizedPayload = PaymentExecutor.createAuthorizedPayload(decision);
 
     // 4. Server-Side Razorpay Order creation
     const orderResponse = await RazorpayOrderService.createOrder(authorizedPayload);
+
+    auditService.appendEvent({
+      sessionId: proposal.sessionId,
+      transactionId: orderResponse.orderId,
+      eventType: 'RAZORPAY_ORDER_CREATED',
+      actor: 'RAZORPAY_GATEWAY',
+      data: {
+        orderId: orderResponse.orderId,
+        amountInPaise: orderResponse.amountInPaise,
+        currency: orderResponse.currency,
+        receipt: orderResponse.receipt,
+      },
+    });
 
     res.json({
       status: 'success',
@@ -92,8 +130,22 @@ paymentRouter.post('/verify', (req: Request, res: Response, next: NextFunction) 
   try {
     const validated = VerifyPaymentSchema.parse(req.body);
     const result = RazorpayVerificationService.verifySignature(validated);
+    const auditService = AuditService.getInstance();
+    const targetSessionId = validated.sessionId || `sess_verify_${Date.now()}`;
 
     if (!result.verified) {
+      auditService.appendEvent({
+        sessionId: targetSessionId,
+        transactionId: validated.razorpay_order_id,
+        eventType: 'PAYMENT_FAILED',
+        actor: 'RAZORPAY_GATEWAY',
+        data: {
+          orderId: validated.razorpay_order_id,
+          paymentId: validated.razorpay_payment_id,
+          reason: result.reason || 'HMAC verification failed',
+        },
+      });
+
       res.status(400).json({
         status: 'error',
         errorType: 'SIGNATURE_VERIFICATION_FAILED',
@@ -102,6 +154,18 @@ paymentRouter.post('/verify', (req: Request, res: Response, next: NextFunction) 
       });
       return;
     }
+
+    auditService.appendEvent({
+      sessionId: targetSessionId,
+      transactionId: validated.razorpay_order_id,
+      eventType: 'PAYMENT_SUCCESS',
+      actor: 'RAZORPAY_GATEWAY',
+      data: {
+        orderId: validated.razorpay_order_id,
+        paymentId: validated.razorpay_payment_id,
+        verifiedBy: 'HMAC-SHA256',
+      },
+    });
 
     res.json({
       status: 'success',
@@ -121,6 +185,20 @@ paymentRouter.post('/report_failure', (req: Request, res: Response, next: NextFu
   try {
     const validated = ReportFailureSchema.parse(req.body);
     const result = RazorpayVerificationService.reportFailure(validated);
+    const auditService = AuditService.getInstance();
+    const targetSessionId = validated.sessionId || `sess_fail_${Date.now()}`;
+
+    auditService.appendEvent({
+      sessionId: targetSessionId,
+      transactionId: validated.razorpay_order_id,
+      eventType: 'PAYMENT_FAILED',
+      actor: 'RAZORPAY_GATEWAY',
+      data: {
+        orderId: validated.razorpay_order_id,
+        paymentId: validated.razorpay_payment_id,
+        errorDescription: validated.error_description || 'Payment rejected by test bank simulator',
+      },
+    });
 
     res.json({
       status: 'success',

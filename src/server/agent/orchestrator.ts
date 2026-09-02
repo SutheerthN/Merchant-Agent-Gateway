@@ -12,6 +12,8 @@ import { AGENT_TOOL_DEFINITIONS, AgentToolExecutor } from './tools.js';
 import { LLMProviderFactory } from './providers/llm.provider.js';
 import { DeterministicPolicyEngine } from '../policy/engine.js';
 import { PurchaseProposal } from '../types/policy.js';
+import { AuditService } from '../audit/audit.service.js';
+import { AuditActor, AuditEventType } from '../audit/audit.types.js';
 
 export const MAX_AGENT_STEPS = 10;
 
@@ -29,7 +31,7 @@ export class CommerceAgentOrchestrator {
    * 1. The agent loop is bounded by MAX_AGENT_STEPS.
    * 2. No payment tools exist; the agent's terminal action is create_purchase_proposal.
    * 3. Financial authorization is 100% delegated to the Deterministic Policy Engine.
-   * 4. No chain-of-thought is exposed; only safe operational events are emitted.
+   * 4. Every step appends a server-hashed, tamper-evident audit event to AuditService.
    */
   public async run(
     input: AgentChatInput,
@@ -37,8 +39,14 @@ export class CommerceAgentOrchestrator {
   ): Promise<AgentExecutionResult> {
     const sessionId = input.sessionId || `sess_agent_${Date.now()}`;
     const events: AgentEvent[] = [];
+    const auditService = AuditService.getInstance();
 
-    const emitEvent = (type: AgentEvent['type'], message: string, data?: unknown) => {
+    const emitEvent = (
+      type: AgentEvent['type'],
+      message: string,
+      data?: unknown,
+      actor: AuditActor = 'AI_BUYER_AGENT'
+    ) => {
       const event: AgentEvent = {
         id: `evt_${crypto.randomUUID()}`,
         type,
@@ -47,6 +55,20 @@ export class CommerceAgentOrchestrator {
         data,
       };
       events.push(event);
+
+      // Append server-generated cryptographic audit event to hash chain
+      let auditType: AuditEventType = type as AuditEventType;
+      if (type === 'POLICY_RESULT' && data && (data as any).decision === 'BLOCK') {
+        auditType = 'POLICY_BLOCKED';
+      }
+
+      auditService.appendEvent({
+        sessionId,
+        eventType: auditType,
+        actor,
+        data: { message, ...(data as object) },
+      });
+
       if (onEvent) {
         onEvent(event);
       }
@@ -54,7 +76,9 @@ export class CommerceAgentOrchestrator {
 
     emitEvent(
       'AGENT_STARTED',
-      `AI Buyer session initialized (${this.provider.name}). Analyzing user request: "${input.message}"`
+      `AI Buyer session initialized (${this.provider.name}). Analyzing user request: "${input.message}"`,
+      { userMessage: input.message },
+      'AI_BUYER_AGENT'
     );
 
     const messages: LLMMessage[] = [
@@ -127,7 +151,8 @@ export class CommerceAgentOrchestrator {
         emitEvent(
           'TOOL_CALL',
           `Calling capability: ${toolCall.name}`,
-          { tool: toolCall.name, arguments: toolCall.arguments }
+          { tool: toolCall.name, arguments: toolCall.arguments },
+          'COMMERCE_TOOL'
         );
 
         const execution = await AgentToolExecutor.executeTool(toolCall);
@@ -137,7 +162,8 @@ export class CommerceAgentOrchestrator {
           emitEvent(
             'PROPOSAL_CREATED',
             `Purchase proposal formulated for SKU(s): ${createdProposal.items.map((i) => `${i.sku} (x${i.quantity})`).join(', ')}`,
-            { proposal: createdProposal }
+            { proposal: createdProposal },
+            'AI_BUYER_AGENT'
           );
         }
 
@@ -147,7 +173,8 @@ export class CommerceAgentOrchestrator {
           {
             tool: toolCall.name,
             hasError: Boolean(execution.result.error),
-          }
+          },
+          'COMMERCE_TOOL'
         );
 
         // Append tool result into context
@@ -169,7 +196,9 @@ export class CommerceAgentOrchestrator {
     if (stepsTaken >= MAX_AGENT_STEPS && !createdProposal) {
       emitEvent(
         'AGENT_ERROR',
-        `Agent loop reached maximum execution steps (${MAX_AGENT_STEPS}). Execution halted.`
+        `Agent loop reached maximum execution steps (${MAX_AGENT_STEPS}). Execution halted.`,
+        undefined,
+        'SYSTEM'
       );
     }
 
@@ -178,7 +207,9 @@ export class CommerceAgentOrchestrator {
     if (createdProposal) {
       emitEvent(
         'POLICY_VALIDATING',
-        'Handing off purchase proposal to Deterministic Policy Engine (Zero LLM)...'
+        'Handing off purchase proposal to Deterministic Policy Engine (Zero LLM)...',
+        undefined,
+        'DETERMINISTIC_POLICY_ENGINE'
       );
 
       const serverProposal: PurchaseProposal = {
@@ -201,11 +232,12 @@ export class CommerceAgentOrchestrator {
           decisionId: policyDecision.decisionId,
           auditEventId: policyDecision.auditEventId,
           totalInPaise: policyDecision.trustedTransaction.finalTotalInPaise,
-        }
+        },
+        'DETERMINISTIC_POLICY_ENGINE'
       );
     }
 
-    emitEvent('AGENT_COMPLETED', 'AI Buyer reasoning workflow completed.');
+    emitEvent('AGENT_COMPLETED', 'AI Buyer reasoning workflow completed.', undefined, 'SYSTEM');
 
     return {
       sessionId,
