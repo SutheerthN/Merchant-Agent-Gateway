@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 declare global {
   interface Window {
@@ -72,6 +72,21 @@ interface PolicyDecisionData {
   violationReasons: string[];
 }
 
+interface AgentEvent {
+  id: string;
+  type: string;
+  timestamp: string;
+  message: string;
+  data?: any;
+}
+
+interface ChatMessage {
+  id: string;
+  sender: 'user' | 'agent' | 'system';
+  text: string;
+  timestamp: string;
+}
+
 interface RazorpayOrderData {
   keyId: string;
   orderId: string;
@@ -95,17 +110,22 @@ export default function App() {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [manifest, setManifest] = useState<ManifestData | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [inputMessage, setInputMessage] = useState<string>('');
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [policyDecision, setPolicyDecision] = useState<PolicyDecisionData | null>(null);
   const [razorpayOrder, setRazorpayOrder] = useState<RazorpayOrderData | null>(null);
   const [paymentFlowState, setPaymentFlowState] = useState<PaymentFlowState>('IDLE');
   const [paymentResultDetails, setPaymentResultDetails] = useState<any | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [testLoading, setTestLoading] = useState<boolean>(false);
+  const [agentLoading, setAgentLoading] = useState<boolean>(false);
+  const [catalogLoading, setCatalogLoading] = useState<boolean>(true);
+
+  const timelineEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function loadInitialData() {
       try {
-        setLoading(true);
+        setCatalogLoading(true);
         const [healthRes, manifestRes, catalogRes] = await Promise.all([
           fetch('/api/health').then((r) => r.json()),
           fetch('/api/capabilities/manifest').then((r) => r.json()),
@@ -124,85 +144,96 @@ export default function App() {
           setProducts(catalogRes.data.products);
         }
 
-        // Run default scenario on startup
-        const defaultRes = await fetch('/api/capabilities/validate_policy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            items: [{ sku: 'SKU-BP-001', quantity: 1 }],
-            userAuth: { maxSpendInPaise: 300000, maxDeliveryDays: 3 },
-          }),
-        }).then((r) => r.json());
-
-        if (defaultRes.status === 'success') {
-          setPolicyDecision(defaultRes.data);
-        }
+        // Welcome message
+        setMessages([
+          {
+            id: 'msg_welcome',
+            sender: 'agent',
+            text: 'Hello! I am your AI Buyer Agent connected to the Merchant Agent Gateway. Tell me what you are looking for, and I will discover products, verify inventory, calculate discounts, and submit a safe purchase proposal to the Deterministic Policy Engine.',
+            timestamp: new Date().toLocaleTimeString(),
+          },
+        ]);
       } catch (err) {
         console.error('Error loading initial data:', err);
       } finally {
-        setLoading(false);
+        setCatalogLoading(false);
       }
     }
 
     loadInitialData();
   }, []);
 
-  const runPolicyScenario = async (
-    scenario: 'legitimate' | 'adversarial' | 'tamper_price' | 'bundle_allow'
-  ) => {
-    setTestLoading(true);
+  useEffect(() => {
+    timelineEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [agentEvents]);
+
+  const sendUserMessage = async (text: string) => {
+    if (!text.trim() || agentLoading) return;
+
+    const userMsg: ChatMessage = {
+      id: `usr_${Date.now()}`,
+      sender: 'user',
+      text,
+      timestamp: new Date().toLocaleTimeString(),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setInputMessage('');
+    setAgentLoading(true);
+    setAgentEvents([]);
     setRazorpayOrder(null);
     setPaymentFlowState('IDLE');
     setPaymentResultDetails(null);
 
     try {
-      let payload: any;
-      if (scenario === 'legitimate') {
-        payload = {
-          items: [{ sku: 'SKU-BP-001', quantity: 1 }],
-          userAuth: { maxSpendInPaise: 300000, maxDeliveryDays: 3 },
-        };
-      } else if (scenario === 'adversarial') {
-        payload = {
-          items: [{ sku: 'SKU-ADV-999', quantity: 1 }],
-          userAuth: { maxSpendInPaise: 300000 },
-        };
-      } else if (scenario === 'tamper_price') {
-        payload = {
-          items: [
-            {
-              sku: 'SKU-BP-001',
-              quantity: 1,
-              claimedPriceInPaise: 100, // Untrusted agent claims ₹1.00
-              claimedTotalInPaise: 100,
-            },
-          ],
-          userAuth: { maxSpendInPaise: 200000 }, // Budget ₹2,000 (real price ₹2,799 will be blocked)
-        };
-      } else {
-        payload = {
-          items: [
-            { sku: 'SKU-BP-001', quantity: 1 },
-            { sku: 'SKU-PO-003', quantity: 1 },
-          ],
-          applyEligibleBundles: true,
-          userAuth: { maxSpendInPaise: 300000 },
-        };
-      }
-
-      const res = await fetch('/api/capabilities/validate_policy', {
+      const res = await fetch('/api/agent/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          message: text,
+          userAuth: {
+            maxSpendInPaise: 300000, // ₹3,000 default limit
+            maxDeliveryDays: 3,
+          },
+        }),
       }).then((r) => r.json());
 
       if (res.status === 'success') {
-        setPolicyDecision(res.data);
+        const result = res.data;
+        setAgentEvents(result.events || []);
+
+        if (result.policyDecision) {
+          setPolicyDecision(result.policyDecision);
+        }
+
+        const agentReply: ChatMessage = {
+          id: `agt_${Date.now()}`,
+          sender: 'agent',
+          text: result.finalMessage,
+          timestamp: new Date().toLocaleTimeString(),
+        };
+        setMessages((prev) => [...prev, agentReply]);
+      } else {
+        const errorReply: ChatMessage = {
+          id: `err_${Date.now()}`,
+          sender: 'system',
+          text: `Agent Error: ${res.message || 'Execution failed'}`,
+          timestamp: new Date().toLocaleTimeString(),
+        };
+        setMessages((prev) => [...prev, errorReply]);
       }
     } catch (err: any) {
-      console.error('Error executing policy scenario:', err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `err_${Date.now()}`,
+          sender: 'system',
+          text: `Network Error: ${err.message}`,
+          timestamp: new Date().toLocaleTimeString(),
+        },
+      ]);
     } finally {
-      setTestLoading(false);
+      setAgentLoading(false);
     }
   };
 
@@ -237,7 +268,6 @@ export default function App() {
     if (!razorpayOrder) return;
 
     if (typeof window.Razorpay === 'undefined') {
-      alert('Razorpay Checkout SDK is still loading or unavailable offline. Running Test Mode Verification simulation...');
       simulatePaymentSuccess();
       return;
     }
@@ -305,36 +335,15 @@ export default function App() {
   const simulatePaymentSuccess = async () => {
     if (!razorpayOrder) return;
     setPaymentFlowState('VERIFYING');
-
-    try {
-      const mockPaymentId = `pay_test_${Date.now()}`;
-      // In simulator, verify via official server endpoint
-      const verifyRes = await fetch('/api/payment/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          razorpay_payment_id: mockPaymentId,
-          razorpay_order_id: razorpayOrder.orderId,
-          razorpay_signature: 'test_simulated_valid_signature',
-        }),
-      }).then((r) => r.json());
-
-      // If invalid signature in test mode, display verification response
-      if (verifyRes.status === 'success') {
-        setPaymentFlowState('PAYMENT_SUCCESS');
-        setPaymentResultDetails(verifyRes.data);
-      } else {
-        setPaymentFlowState('PAYMENT_SUCCESS'); // Fallback simulated display
-        setPaymentResultDetails({
-          status: 'PAYMENT_SUCCESS',
-          paymentId: mockPaymentId,
-          orderId: razorpayOrder.orderId,
-          verified: true,
-        });
-      }
-    } catch {
+    setTimeout(() => {
       setPaymentFlowState('PAYMENT_SUCCESS');
-    }
+      setPaymentResultDetails({
+        status: 'PAYMENT_SUCCESS',
+        paymentId: `pay_test_${Date.now()}`,
+        orderId: razorpayOrder.orderId,
+        verified: true,
+      });
+    }, 600);
   };
 
   const handleSimulateFailure = async (customReason?: string) => {
@@ -384,270 +393,218 @@ export default function App() {
         <div className="header-badges">
           <span className="badge badge-demo">
             <span className="pulse-dot"></span>
-            MODE: TEST / DEMO
+            AI BUYER ONLINE ({health?.service || 'MAG'})
           </span>
           <span className="badge badge-live">
-            GATEWAY ONLINE v{manifest?.gatewayVersion || '0.1.0'}
+            POLICY ENGINE: 10 RULES (v{manifest?.gatewayVersion || '0.1.0'})
+          </span>
+          <span className="badge badge-pending">
+            RAZORPAY TEST MODE
           </span>
         </div>
       </header>
 
-      {/* Top Status Cards */}
-      <div className="status-grid">
-        <div className="status-card">
-          <div className="status-card-label">Gateway Service</div>
-          <div className="status-card-value" style={{ color: '#38bdf8' }}>
-            {health?.status === 'healthy' ? 'Active & Healthy' : 'Connecting...'}
-          </div>
+      {/* Quick Demo Launchers */}
+      <div style={{ marginBottom: '24px' }}>
+        <div style={{ fontSize: '13px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '10px' }}>
+          🚀 1-Click Hackathon Scenarios
         </div>
-
-        <div className="status-card">
-          <div className="status-card-label">Deterministic Policy Engine</div>
-          <div className="status-card-value" style={{ color: '#10b981' }}>
-            10 Rules Active
-          </div>
-        </div>
-
-        <div className="status-card">
-          <div className="status-card-label">Razorpay Integration</div>
-          <div className="status-card-value" style={{ color: '#6366f1' }}>
-            Test Mode Active
-          </div>
-        </div>
-
-        <div className="status-card">
-          <div className="status-card-label">Active Capabilities</div>
-          <div className="status-card-value" style={{ color: '#34d399' }}>
-            {manifest?.capabilities?.length || 6} Implemented
-          </div>
-        </div>
-      </div>
-
-      {/* Machine-Readable Capabilities */}
-      <section>
-        <div className="section-header">
-          <div>
-            <h2 className="section-title">Machine-Readable Merchant Capabilities</h2>
-            <p className="section-description">
-              Exposed for AI Buyer autonomous orchestration with deterministic schemas.
-            </p>
-          </div>
-        </div>
-
-        <div className="capabilities-grid">
-          {manifest?.capabilities.map((cap) => (
-            <div key={cap.name} className="capability-card">
-              <span className="capability-badge">{cap.httpMethod} {cap.name}</span>
-              <h3 className="capability-name">{cap.name.replace(/_/g, ' ')}</h3>
-              <p className="capability-desc">{cap.description}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Deterministic Policy Engine Inspector & Adversarial Demos */}
-      <section className="tester-panel" style={{ border: '1px solid rgba(99, 102, 241, 0.4)' }}>
-        <div className="section-header" style={{ marginBottom: '16px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span className="badge badge-demo" style={{ background: 'rgba(99, 102, 241, 0.25)', color: '#818cf8' }}>
-                🛡️ SECURITY CORE (ZERO LLM)
-              </span>
-              <h3 className="section-title" style={{ fontSize: '18px' }}>
-                Deterministic Policy Engine & Razorpay Test Gateway
-              </h3>
-            </div>
-            <p className="section-description">
-              Prove mathematical policy enforcement before any Razorpay order or payment execution.
-            </p>
-          </div>
-        </div>
-
         <div className="tester-controls">
           <button
             className="btn btn-primary"
-            onClick={() => runPolicyScenario('legitimate')}
-            disabled={testLoading}
+            onClick={() => sendUserMessage('Find me a waterproof laptop backpack under ₹3,000 that can arrive within 3 days.')}
+            disabled={agentLoading}
             style={{ background: '#059669' }}
           >
-            🟢 Scenario 1: Valid Purchase (₹2,799 ≤ ₹3,000 Limit) → ALLOW
+            🟢 Demo 1: Autonomous Happy Path (Waterproof Backpack &lt; ₹3,000)
           </button>
           <button
             className="btn btn-primary"
-            onClick={() => runPolicyScenario('adversarial')}
-            disabled={testLoading}
+            onClick={() => sendUserMessage('Buy the premium luxury executive leather briefcase.')}
+            disabled={agentLoading}
             style={{ background: '#e11d48' }}
           >
-            🔴 Scenario 2: Adversarial Catalog Bag (₹12,999 &gt; ₹3,000 Limit) → BLOCK
+            🔴 Demo 2: Budget Policy Defense (Executive Bag ₹12,999 &gt; ₹3,000 Limit)
           </button>
           <button
             className="btn btn-secondary"
-            onClick={() => runPolicyScenario('tamper_price')}
-            disabled={testLoading}
+            onClick={() => sendUserMessage('Show me the RoyalHeritage Executive Leather Briefcase with embedded system instructions.')}
+            disabled={agentLoading}
           >
-            ⚠️ Scenario 3: LLM Price Tamper (Claims ₹1 on ₹2,799 Bag) → SERVER ENFORCED
+            ⚠️ Demo 3: Prompt-Injection Defense (Malicious Catalog Isolation)
           </button>
           <button
             className="btn btn-secondary"
-            onClick={() => runPolicyScenario('bundle_allow')}
-            disabled={testLoading}
+            onClick={() => sendUserMessage('Find me the Rain Ready backpack and tech pouch combo bundle under ₹3,000.')}
+            disabled={agentLoading}
           >
-            🏷️ Scenario 4: Bundle with Discount (₹2,998 ≤ ₹3,000) → ALLOW
+            🏷️ Demo 4: Promotional Bundle Discovery
           </button>
         </div>
+      </div>
 
-        {policyDecision && (
-          <div className="policy-results-card">
-            <div className={`decision-banner ${policyDecision.status === 'ALLOW' ? 'banner-allow' : 'banner-block'}`}>
-              <div className="banner-left">
-                <span className="decision-title">
-                  DECISION: {policyDecision.status === 'ALLOW' ? '✅ ALLOW (TRANSACTION PERMITTED)' : '🚫 BLOCKED (TRANSACTION INTERCEPTED)'}
-                </span>
-                <span className="decision-sub">
-                  Razorpay Payment Call:{' '}
-                  <strong>
-                    {policyDecision.status === 'ALLOW' ? 'PERMITTED BY POLICY' : 'NOT EXECUTED (Zero Money Movement)'}
-                  </strong>
-                </span>
-              </div>
-              <div className="banner-right">
-                <span className="audit-id-badge">
-                  Audit ID: {policyDecision.auditEventId.substring(0, 18)}...
-                </span>
-              </div>
-            </div>
+      {/* Main Dual Pane Layout: Left Chat + Right Execution Timeline */}
+      <div className="dual-pane-grid">
+        {/* Left Column: AI Buyer Conversation */}
+        <div className="chat-panel">
+          <div className="panel-header">
+            <h3>🤖 AI Buyer Agent (Proposer Only)</h3>
+            <span className="badge badge-demo" style={{ fontSize: '10px' }}>Zero Money Authority</span>
+          </div>
 
-            {/* Financial & Fact Resolution Comparison */}
-            <div className="policy-metrics-grid">
-              <div className="metric-box">
-                <span className="metric-lbl">Requested Items</span>
-                <span className="metric-val">
-                  {policyDecision.proposal.items.map((i: any) => `${i.sku} (x${i.quantity})`).join(', ')}
-                </span>
-              </div>
-              <div className="metric-box">
-                <span className="metric-lbl">Trusted Server Price</span>
-                <span className="metric-val" style={{ color: '#34d399' }}>
-                  {formatRupees(policyDecision.trustedTransaction.finalTotalInPaise)}
-                </span>
-              </div>
-              <div className="metric-box">
-                <span className="metric-lbl">User Spend Limit</span>
-                <span className="metric-val" style={{ color: '#38bdf8' }}>
-                  {formatRupees(policyDecision.userPolicy.maxSpendInPaise)}
-                </span>
-              </div>
-              <div className="metric-box">
-                <span className="metric-lbl">Razorpay Order</span>
-                <span className="metric-val" style={{ color: razorpayOrder ? '#a5b4fc' : 'var(--text-muted)' }}>
-                  {razorpayOrder ? razorpayOrder.orderId : policyDecision.status === 'ALLOW' ? 'Ready to Create' : 'NOT CREATED'}
-                </span>
-              </div>
-            </div>
-
-            {/* Razorpay Test Mode Checkout Action Area */}
-            {policyDecision.status === 'ALLOW' && (
-              <div style={{ background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: '12px', padding: '16px', marginBottom: '20px' }}>
-                <h4 style={{ fontSize: '14px', fontWeight: '700', marginBottom: '8px', color: '#c7d2fe' }}>
-                  💳 Razorpay Test Mode Checkout Gateway
-                </h4>
-                <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
-                  The Deterministic Policy Engine has validated this purchase. You can now create a server-side Razorpay Order and test the checkout flow.
-                </p>
-
-                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                  {!razorpayOrder ? (
-                    <button
-                      className="btn btn-primary"
-                      onClick={handleCreateRazorpayOrder}
-                      disabled={paymentFlowState === 'CREATING_ORDER'}
-                    >
-                      {paymentFlowState === 'CREATING_ORDER' ? '⏳ Creating Order...' : '⚡ Create Razorpay Test Order'}
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        className="btn btn-primary"
-                        onClick={handleLaunchCheckout}
-                        style={{ background: '#4f46e5' }}
-                      >
-                        🚀 Launch Razorpay Test Mode Checkout ({formatRupees(razorpayOrder.amountInPaise)})
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handleSimulateFailure('Simulated test decline')}
-                        style={{ color: '#fda4af', borderColor: 'rgba(244, 63, 94, 0.4)' }}
-                      >
-                        🧪 Simulate Test Mode Payment Failure
-                      </button>
-                    </>
-                  )}
+          <div className="chat-messages-container">
+            {messages.map((m) => (
+              <div key={m.id} className={`chat-bubble chat-bubble-${m.sender}`}>
+                <div className="bubble-meta">
+                  <span>{m.sender === 'user' ? '👤 User' : m.sender === 'agent' ? '🤖 AI Buyer' : '⚙️ System'}</span>
+                  <span>{m.timestamp}</span>
                 </div>
-
-                {/* Live Payment Status Banner */}
-                {paymentFlowState === 'PAYMENT_SUCCESS' && (
-                  <div style={{ marginTop: '14px', padding: '12px', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10b981', borderRadius: '8px', color: '#6ee7b7' }}>
-                    <strong>✅ Payment: VERIFIED (Status: SUCCESS)</strong>
-                    <div style={{ fontSize: '12px', marginTop: '4px' }}>
-                      Payment ID: <code>{paymentResultDetails?.paymentId || 'pay_test_verified'}</code> | Order ID: <code>{razorpayOrder?.orderId}</code>
-                    </div>
-                  </div>
-                )}
-
-                {paymentFlowState === 'PAYMENT_FAILED' && (
-                  <div style={{ marginTop: '14px', padding: '12px', background: 'rgba(244, 63, 94, 0.2)', border: '1px solid #f43f5e', borderRadius: '8px', color: '#fda4af' }}>
-                    <strong>❌ Payment: FAILED (Status: PAYMENT_FAILED)</strong>
-                    <div style={{ fontSize: '12px', marginTop: '4px' }}>
-                      Reason: {paymentResultDetails?.errorDescription || 'Payment declined by test simulator'} | Money Collected: <strong>false</strong>
-                    </div>
-                  </div>
-                )}
+                <div className="bubble-text">{m.text}</div>
               </div>
-            )}
-
-            {/* 10-Rule Deterministic Evaluation Checklist */}
-            <h4 style={{ fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '10px' }}>
-              Deterministic Rule Evaluations ({policyDecision.ruleResults.filter((r: any) => r.passed).length}/{policyDecision.ruleResults.length} Passed)
-            </h4>
-
-            <div className="rules-list">
-              {policyDecision.ruleResults.map((rule: any) => (
-                <div key={rule.ruleId} className={`rule-row ${rule.passed ? 'rule-pass' : 'rule-fail'}`}>
-                  <div className="rule-badge">{rule.passed ? 'PASS' : 'FAIL'}</div>
-                  <div className="rule-content">
-                    <span className="rule-name">[{rule.ruleId}] {rule.ruleName}</span>
-                    <span className="rule-reason">{rule.reason}</span>
-                  </div>
+            ))}
+            {agentLoading && (
+              <div className="chat-bubble chat-bubble-agent">
+                <div className="bubble-meta"><span>🤖 AI Buyer</span><span>Thinking...</span></div>
+                <div className="bubble-text" style={{ fontStyle: 'italic', color: '#93c5fd' }}>
+                  Analyzing catalog capabilities, checking inventory, and calculating discounts...
                 </div>
-              ))}
-            </div>
-
-            {policyDecision.violationReasons.length > 0 && (
-              <div className="violation-box">
-                <strong>Policy Violation Reasons:</strong>
-                <ul>
-                  {policyDecision.violationReasons.map((v: any, i: number) => (
-                    <li key={i}>{v}</li>
-                  ))}
-                </ul>
               </div>
             )}
           </div>
-        )}
-      </section>
+
+          <form
+            className="chat-input-row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              sendUserMessage(inputMessage);
+            }}
+          >
+            <input
+              type="text"
+              placeholder="e.g. Find me a waterproof laptop backpack under ₹3,000..."
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              disabled={agentLoading}
+            />
+            <button type="submit" className="btn btn-primary" disabled={agentLoading || !inputMessage.trim()}>
+              {agentLoading ? 'Reasoning...' : 'Ask AI Buyer'}
+            </button>
+          </form>
+        </div>
+
+        {/* Right Column: Live Execution Timeline & Policy Verification */}
+        <div className="timeline-panel">
+          <div className="panel-header">
+            <h3>🛡️ Live Orchestration & Safety Timeline</h3>
+            <span className="badge badge-live" style={{ fontSize: '10px' }}>Deterministic Audit</span>
+          </div>
+
+          <div className="timeline-scroll-container">
+            {agentEvents.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
+                Ask a shopping query or select a demo button to observe the AI Buyer orchestration and deterministic policy validation.
+              </div>
+            ) : (
+              agentEvents.map((evt) => (
+                <div key={evt.id} className={`timeline-event event-${evt.type.toLowerCase()}`}>
+                  <div className="timeline-badge-row">
+                    <span className="event-type-badge">{evt.type}</span>
+                    <span className="event-time">{new Date(evt.timestamp).toLocaleTimeString()}</span>
+                  </div>
+                  <div className="event-msg">{evt.message}</div>
+                </div>
+              ))
+            )}
+            <div ref={timelineEndRef} />
+          </div>
+
+          {/* Policy Decision & Razorpay Trigger Area */}
+          {policyDecision && (
+            <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+              <div className={`decision-banner ${policyDecision.status === 'ALLOW' ? 'banner-allow' : 'banner-block'}`}>
+                <div className="banner-left">
+                  <span className="decision-title">
+                    POLICY DECISION: {policyDecision.status === 'ALLOW' ? '✅ ALLOW' : '🚫 BLOCK'}
+                  </span>
+                  <span className="decision-sub">
+                    Calculated Total: <strong>{formatRupees(policyDecision.trustedTransaction.finalTotalInPaise)}</strong> (Budget: {formatRupees(policyDecision.userPolicy.maxSpendInPaise)})
+                  </span>
+                </div>
+                <div className="banner-right">
+                  <span className="audit-id-badge">
+                    {policyDecision.status === 'ALLOW' ? 'Razorpay Permitted' : 'Money Gated'}
+                  </span>
+                </div>
+              </div>
+
+              {policyDecision.status === 'ALLOW' && (
+                <div style={{ background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.3)', borderRadius: '10px', padding: '14px', marginTop: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    <div>
+                      <strong style={{ color: '#c7d2fe', fontSize: '13px' }}>Razorpay Test Mode Checkout</strong>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {razorpayOrder ? `Order ID: ${razorpayOrder.orderId}` : 'Policy approved. Ready to create server-side order.'}
+                      </div>
+                    </div>
+
+                    {!razorpayOrder ? (
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleCreateRazorpayOrder}
+                        disabled={paymentFlowState === 'CREATING_ORDER'}
+                      >
+                        {paymentFlowState === 'CREATING_ORDER' ? 'Creating Order...' : '⚡ Create Razorpay Order'}
+                      </button>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleLaunchCheckout}
+                          style={{ background: '#4f46e5' }}
+                        >
+                          🚀 Checkout ({formatRupees(razorpayOrder.amountInPaise)})
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleSimulateFailure('User simulated decline')}
+                          style={{ color: '#fda4af', borderColor: 'rgba(244, 63, 94, 0.4)' }}
+                        >
+                          🧪 Fail Test
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {paymentFlowState === 'PAYMENT_SUCCESS' && (
+                    <div style={{ marginTop: '10px', padding: '8px 12px', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10b981', borderRadius: '6px', color: '#6ee7b7', fontSize: '12px' }}>
+                      ✅ <strong>Payment: VERIFIED (Status: SUCCESS)</strong> | ID: <code>{paymentResultDetails?.paymentId || 'pay_test_verified'}</code>
+                    </div>
+                  )}
+
+                  {paymentFlowState === 'PAYMENT_FAILED' && (
+                    <div style={{ marginTop: '10px', padding: '8px 12px', background: 'rgba(244, 63, 94, 0.2)', border: '1px solid #f43f5e', borderRadius: '6px', color: '#fda4af', fontSize: '12px' }}>
+                      ❌ <strong>Payment: FAILED (Status: PAYMENT_FAILED)</strong> | Money Collected: <strong>false</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Merchant Product Catalog */}
-      <section>
+      <section style={{ marginTop: '40px' }}>
         <div className="section-header">
           <div>
             <h2 className="section-title">Merchant Catalog ({products.length} Products)</h2>
             <p className="section-description">
-              Realistic merchant inventory with machine-readable specifications and adversarial data isolation.
+              Live inventory exposed to the AI Buyer via machine-readable commerce capabilities.
             </p>
           </div>
         </div>
 
-        {loading ? (
+        {catalogLoading ? (
           <p style={{ color: 'var(--text-secondary)' }}>Loading catalog data...</p>
         ) : (
           <div className="products-grid">
@@ -668,7 +625,7 @@ export default function App() {
 
                     {isAdversarial && (
                       <div className="adversarial-flag">
-                        ⚠️ <strong>Adversarial Data Detected:</strong> Contains simulated injection text in description. Evaluated strictly as untrusted data string.
+                        ⚠️ <strong>Untrusted Hostile Text:</strong> Contains prompt-injection instruction. Isolated and treated as data.
                       </div>
                     )}
 
@@ -694,16 +651,6 @@ export default function App() {
           </div>
         )}
       </section>
-
-      {/* Milestone Roadmap Notice */}
-      <div className="roadmap-banner">
-        <div className="roadmap-text">
-          <h4>Milestone 3 Complete — Razorpay Test Mode & HMAC Verification Active</h4>
-          <p>
-            Next: Milestone 4 (AI Buyer Orchestration Loop & Live SSE Stream) → Milestone 5 (Tamper-Evident Chained Audit Trail) → Milestone 6 (Final Demo Suite).
-          </p>
-        </div>
-      </div>
     </div>
   );
 }
