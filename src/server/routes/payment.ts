@@ -1,5 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import crypto from 'crypto';
 import { z } from 'zod';
+import { config } from '../config.js';
 import { ValidatePolicySchema } from '../capabilities/schemas.js';
 import { DeterministicPolicyEngine } from '../policy/engine.js';
 import { PaymentExecutor } from '../payment/boundary.js';
@@ -197,6 +199,77 @@ paymentRouter.post('/report_failure', (req: Request, res: Response, next: NextFu
         orderId: validated.razorpay_order_id,
         paymentId: validated.razorpay_payment_id,
         errorDescription: validated.error_description || 'Payment rejected by test bank simulator',
+      },
+    });
+
+    res.json({
+      status: 'success',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/payment/demo_success (DEMO/TEST ONLY)
+ *
+ * Server-side simulation endpoint for placeholder test mode.
+ * SECURITY INVARIANTS:
+ * 1. Requires valid orderId created by an authorized policy ALLOW decision.
+ * 2. Cannot bypass POLICY_BLOCKED transactions.
+ * 3. Server generates HMAC SHA-256 signature internally using server secret.
+ * 4. Browser NEVER sees or calculates HMAC signature or secret.
+ */
+const DemoSuccessSchema = z.object({
+  sessionId: z.string().min(1, 'Session ID is required'),
+  orderId: z.string().min(1, 'Order ID is required'),
+  decisionId: z.string().optional(),
+});
+
+paymentRouter.post('/demo_success', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const validated = DemoSuccessSchema.parse(req.body);
+    const orderLogs = RazorpayOrderService.getAuditLogs();
+    const authorizedOrder = orderLogs.find((o) => o.orderId === validated.orderId);
+
+    // Enforce policy authorization check: order MUST exist from a successful createOrder call
+    if (!authorizedOrder) {
+      res.status(403).json({
+        status: 'error',
+        errorType: 'UNAUTHORIZED_DEMO_PAYMENT',
+        message: 'Demo payment rejected: Transaction order was not authorized by the policy engine.',
+      });
+      return;
+    }
+
+    const secret = config.RAZORPAY_KEY_SECRET || 'placeholder_key_secret';
+    const mockPaymentId = `pay_demo_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const payloadToSign = `${validated.orderId}|${mockPaymentId}`;
+
+    const serverGeneratedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(payloadToSign)
+      .digest('hex');
+
+    const result = RazorpayVerificationService.verifySignature({
+      razorpay_order_id: validated.orderId,
+      razorpay_payment_id: mockPaymentId,
+      razorpay_signature: serverGeneratedSignature,
+      decisionId: validated.decisionId || authorizedOrder.decisionId,
+    });
+
+    const auditService = AuditService.getInstance();
+    auditService.appendEvent({
+      sessionId: validated.sessionId,
+      transactionId: validated.orderId,
+      eventType: 'PAYMENT_SUCCESS',
+      actor: 'RAZORPAY_GATEWAY',
+      data: {
+        orderId: validated.orderId,
+        paymentId: mockPaymentId,
+        verifiedBy: 'SERVER_DEMO_HMAC_SHA256',
+        isDemoMode: true,
       },
     });
 

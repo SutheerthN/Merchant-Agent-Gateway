@@ -209,4 +209,101 @@ describe('Razorpay Test Mode Integration & Security Tests (Milestone 3)', () => 
     expect(orderCreatedEvt.razorpayCallExecuted).toBe(true);
     expect(orderCreatedEvt.outcome).toBe('SUCCESS');
   });
+
+  // TEST 11: Demo success endpoint verifies authorized order created by policy engine
+  it('TEST 11: POST /api/payment/demo_success succeeds for authorized order', async () => {
+    const orderRes = await request(app)
+      .post('/api/payment/create_order')
+      .send({
+        items: [{ sku: 'SKU-BP-001', quantity: 1 }],
+        userAuth: { maxSpendInPaise: 300000 },
+      });
+
+    expect(orderRes.status).toBe(200);
+    const orderId = orderRes.body.data.order.orderId;
+
+    const demoRes = await request(app)
+      .post('/api/payment/demo_success')
+      .send({
+        sessionId: 'sess_test_demo',
+        orderId,
+      });
+
+    expect(demoRes.status).toBe(200);
+    expect(demoRes.body.status).toBe('success');
+    expect(demoRes.body.data.verified).toBe(true);
+    expect(demoRes.body.data.status).toBe('PAYMENT_SUCCESS');
+  });
+
+  // TEST 12: Demo success endpoint REJECTS fake/unauthorized order ID (Cannot bypass policy)
+  it('TEST 12: POST /api/payment/demo_success REJECTS fake or unauthorized order ID with 403 Forbidden', async () => {
+    const demoRes = await request(app)
+      .post('/api/payment/demo_success')
+      .send({
+        sessionId: 'sess_test_fake',
+        orderId: 'order_fake_unauthorized_999',
+      });
+
+    expect(demoRes.status).toBe(403);
+    expect(demoRes.body.status).toBe('error');
+    expect(demoRes.body.errorType).toBe('UNAUTHORIZED_DEMO_PAYMENT');
+  });
+
+  // TEST 13: Zero payment secrets in frontend source code
+  it('TEST 13: Frontend source code contains ZERO payment secrets', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const appTsxContent = fs.readFileSync(
+      path.join(__dirname, '../src/client/src/App.tsx'),
+      'utf-8'
+    );
+
+    expect(appTsxContent).not.toContain('placeholder_key_secret');
+    expect(appTsxContent).not.toContain('RAZORPAY_KEY_SECRET');
+  });
+
+  // TEST 14: Demo success endpoint CANNOT bypass POLICY_BLOCKED transaction
+  it('TEST 14: POST /api/payment/demo_success CANNOT bypass POLICY_BLOCKED transaction', async () => {
+    // 1. Attempt blocked transaction
+    const blockedRes = await request(app)
+      .post('/api/payment/create_order')
+      .send({
+        items: [{ sku: 'SKU-ADV-999', quantity: 1 }],
+        userAuth: { maxSpendInPaise: 300000 },
+      });
+
+    expect(blockedRes.status).toBe(403);
+    expect(blockedRes.body.errorType).toBe('POLICY_BLOCKED');
+
+    // 2. Attempt demo_success with blocked proposal details / arbitrary order ID
+    const demoRes = await request(app)
+      .post('/api/payment/demo_success')
+      .send({
+        sessionId: 'sess_test_blocked_bypass',
+        orderId: 'order_blocked_attempt_001',
+        decisionId: blockedRes.body.data.decisionId,
+      });
+
+    expect(demoRes.status).toBe(403);
+    expect(demoRes.body.errorType).toBe('UNAUTHORIZED_DEMO_PAYMENT');
+  });
+
+  // TEST 15: Zero payment secrets in production compiled client bundle (dist/)
+  it('TEST 15: Compiled client build bundle (dist/) contains ZERO payment secrets', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const distPath = path.join(__dirname, '../dist');
+
+    if (fs.existsSync(distPath)) {
+      const files = fs.readdirSync(path.join(distPath, 'assets'));
+      for (const file of files) {
+        if (file.endsWith('.js')) {
+          const bundleContent = fs.readFileSync(path.join(distPath, 'assets', file), 'utf-8');
+          expect(bundleContent).not.toContain('placeholder_key_secret');
+          expect(bundleContent).not.toContain('RAZORPAY_KEY_SECRET');
+        }
+      }
+    }
+  });
 });

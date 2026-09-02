@@ -126,24 +126,6 @@ type PaymentFlowState =
   | 'PAYMENT_SUCCESS'
   | 'PAYMENT_FAILED';
 
-async function computeHmacSha256(message: string, secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
-  const messageData = encoder.encode(message);
-
-  const cryptoKey = await window.crypto.subtle.importKey(
-    'raw',
-    keyData,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-
-  const signatureBuffer = await window.crypto.subtle.sign('HMAC', cryptoKey, messageData);
-  const hashArray = Array.from(new Uint8Array(signatureBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 export default function App() {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [manifest, setManifest] = useState<ManifestData | null>(null);
@@ -434,20 +416,13 @@ export default function App() {
     setPaymentFlowState('VERIFYING');
 
     try {
-      const mockPaymentId = `pay_test_${Date.now()}`;
-      const payloadToSign = `${razorpayOrder.orderId}|${mockPaymentId}`;
-      const signature = await computeHmacSha256(payloadToSign, 'placeholder_key_secret');
-
-      const verifyRes = await fetch('/api/payment/verify', {
+      const verifyRes = await fetch('/api/payment/demo_success', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId: currentSessionId,
-          razorpay_payment_id: mockPaymentId,
-          razorpay_order_id: razorpayOrder.orderId,
-          razorpay_signature: signature,
+          orderId: razorpayOrder.orderId,
           decisionId: razorpayOrder.decisionId,
-          auditEventId: razorpayOrder.auditEventId,
         }),
       }).then((r) => r.json());
 
