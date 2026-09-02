@@ -3,6 +3,7 @@ import cors from 'cors';
 import { ZodError } from 'zod';
 import { capabilitiesRouter } from './routes/capabilities.js';
 import { healthRouter } from './routes/health.js';
+import { paymentRouter } from './routes/payment.js';
 
 export function createApp() {
   const app = express();
@@ -13,6 +14,7 @@ export function createApp() {
   // Mount API Routers
   app.use('/api/health', healthRouter);
   app.use('/api/capabilities', capabilitiesRouter);
+  app.use('/api/payment', paymentRouter);
 
   // Global Zod & Error Handler
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

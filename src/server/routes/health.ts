@@ -10,7 +10,7 @@ healthRouter.get('/', (_req: Request, res: Response) => {
     service: 'Merchant Agent Gateway',
     version: manifest.gatewayVersion,
     mode: 'TEST / DEMO',
-    paymentIntegration: 'INACTIVE (Milestone 3 Pending)',
+    paymentIntegration: 'RAZORPAY_TEST_MODE_ACTIVE (Server-Side Orders + HMAC Verification)',
     policyEngine: 'DETERMINISTIC_ACTIVE (10 Rules Enforced)',
     activeCapabilities: manifest.capabilities.map((c) => c.name),
     uptimeSeconds: Math.floor(process.uptime()),

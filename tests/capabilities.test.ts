@@ -13,7 +13,7 @@ describe('Merchant Agent Gateway - Milestone 1 Tests', () => {
       expect(res.body.status).toBe('healthy');
       expect(res.body.service).toBe('Merchant Agent Gateway');
       expect(res.body.mode).toBe('TEST / DEMO');
-      expect(res.body.paymentIntegration).toContain('INACTIVE');
+      expect(res.body.paymentIntegration).toContain('RAZORPAY_TEST_MODE_ACTIVE');
       expect(res.body.activeCapabilities).toContain('DISCOVER_PRODUCTS');
       expect(res.body.activeCapabilities).toContain('CHECK_PRICE');
     });
