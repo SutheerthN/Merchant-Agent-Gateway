@@ -832,3 +832,166 @@ body {
   border-top: 1px solid rgba(255, 255, 255, 0.04);
   background: #060910;
 }
+
+/* Product Value Proposition Bar */
+.value-prop-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 24px;
+}
+
+.value-prop-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.value-prop-item strong {
+  font-size: 11px;
+  color: var(--accent-blue);
+  letter-spacing: 0.04em;
+}
+
+.value-prop-item span {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Architectural Safety Card */
+.architectural-safety-card {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(16, 185, 129, 0.05));
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.safety-flow-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.flow-step {
+  flex: 1;
+  min-width: 180px;
+  background: rgba(8, 11, 17, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.step-untrusted {
+  border-left: 3px solid #f59e0b;
+}
+
+.step-policy {
+  border-left: 3px solid #10b981;
+}
+
+.step-execution {
+  border-left: 3px solid #6366f1;
+}
+
+.step-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.flow-step strong {
+  font-size: 13px;
+  color: #fff;
+}
+
+.flow-step small {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.flow-arrow {
+  font-size: 18px;
+  color: var(--text-muted);
+}
+
+.safety-slogan {
+  text-align: center;
+  font-size: 13px;
+  color: #c7d2fe;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+/* Core Lifecycle Ribbon */
+.lifecycle-ribbon {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.ribbon-step {
+  flex: 1;
+  min-width: 120px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ribbon-num {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.step-active {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: #38bdf8;
+  color: #38bdf8;
+}
+
+.step-pass {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: #10b981;
+  color: #34d399;
+}
+
+.step-block {
+  background: rgba(244, 63, 94, 0.1);
+  border-color: #f43f5e;
+  color: #fda4af;
+}
+
+/* Attack Blocked Card */
+.attack-blocked-card {
+  background: rgba(244, 63, 94, 0.12);
+  border: 1px solid #f43f5e;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-top: 14px;
+}

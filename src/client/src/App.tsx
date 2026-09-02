@@ -70,6 +70,7 @@ interface PolicyDecisionData {
   };
   ruleResults: RuleResult[];
   violationReasons: string[];
+  razorpayCallExecuted: boolean;
 }
 
 interface AgentEvent {
@@ -167,14 +168,7 @@ export default function App() {
           setProducts(catalogRes.data.products);
         }
 
-        setMessages([
-          {
-            id: 'msg_welcome',
-            sender: 'agent',
-            text: 'Hello! I am your AI Buyer Agent connected to the Merchant Agent Gateway. Tell me what you are looking for, and I will discover products, verify inventory, calculate discounts, and submit a safe purchase proposal to the Deterministic Policy Engine.',
-            timestamp: new Date().toLocaleTimeString(),
-          },
-        ]);
+        resetDemoState();
       } catch (err) {
         console.error('Error loading initial data:', err);
       } finally {
@@ -188,6 +182,26 @@ export default function App() {
   useEffect(() => {
     timelineEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [agentEvents]);
+
+  const resetDemoState = () => {
+    const newSessionId = `sess_demo_${Date.now()}`;
+    setCurrentSessionId(newSessionId);
+    setMessages([
+      {
+        id: 'msg_welcome',
+        sender: 'agent',
+        text: 'Welcome to the Merchant Agent Gateway! I am your AI Buyer Agent. Select a 1-click scenario or ask a shopping query to observe bounded AI reasoning, deterministic policy enforcement, and Razorpay Test Mode execution.',
+        timestamp: new Date().toLocaleTimeString(),
+      },
+    ]);
+    setAgentEvents([]);
+    setPolicyDecision(null);
+    setRazorpayOrder(null);
+    setPaymentFlowState('IDLE');
+    setPaymentResultDetails(null);
+    setAuditRecords([]);
+    setChainVerification(null);
+  };
 
   const loadAuditData = async (sessId: string) => {
     if (!sessId) return;
@@ -227,8 +241,7 @@ export default function App() {
     setPaymentResultDetails(null);
     setChainVerification(null);
 
-    const sessionId = `sess_${Date.now()}`;
-    setCurrentSessionId(sessionId);
+    const sessionId = currentSessionId || `sess_${Date.now()}`;
 
     try {
       const res = await fetch('/api/agent/chat', {
@@ -238,7 +251,7 @@ export default function App() {
           message: text,
           sessionId,
           userAuth: {
-            maxSpendInPaise: 300000,
+            maxSpendInPaise: 300000, // ₹3,000 budget
             maxDeliveryDays: 3,
           },
         }),
@@ -431,6 +444,13 @@ export default function App() {
     }).format(paise / 100);
   };
 
+  // Determine stage status for progress ribbon
+  const hasDiscovery = agentEvents.some((e) => e.type === 'TOOL_CALL' && e.data?.tool === 'discover_products');
+  const hasProposal = policyDecision !== null || agentEvents.some((e) => e.type === 'PROPOSAL_CREATED');
+  const policyStatus = policyDecision ? policyDecision.status : 'PENDING';
+  const orderCreated = razorpayOrder !== null;
+  const paymentDone = paymentFlowState === 'PAYMENT_SUCCESS';
+
   return (
     <div className="app-container">
       {/* Top Header */}
@@ -440,60 +460,131 @@ export default function App() {
           <div>
             <h1 className="brand-title">Merchant Agent Gateway</h1>
             <p className="brand-subtitle">
-              Razorpay AI Buildathon 2026 • Track 01: AI Growth & Agentic Commerce
+              Make your commerce system machine-readable and safely transactable by AI buyers.
             </p>
           </div>
         </div>
         <div className="header-badges">
           <span className="badge badge-demo">
             <span className="pulse-dot"></span>
-            AI BUYER ONLINE ({health?.service || 'MAG'})
+            BUILDATHON 2026 TRACK 01 ({health?.service || 'MAG'})
           </span>
           <span className="badge badge-live">
-            SHA-256 AUDIT CHAIN ACTIVE (v{manifest?.gatewayVersion || '0.1.0'})
+            DEMO MODE: Scripted Provider (v{manifest?.gatewayVersion || '0.1.0'})
           </span>
           <span className="badge badge-pending">
-            RAZORPAY TEST MODE
+            SHA-256 AUDIT CHAIN ACTIVE
           </span>
         </div>
       </header>
 
-      {/* Quick Demo Launchers */}
+      {/* Product Value Proposition Bar */}
+      <div className="value-prop-bar">
+        <div className="value-prop-item">
+          <strong>1. DISCOVER</strong>
+          <span>Machine-Readable Catalog</span>
+        </div>
+        <div className="value-prop-item">
+          <strong>2. VERIFY</strong>
+          <span>Warehouse Price & Stock</span>
+        </div>
+        <div className="value-prop-item">
+          <strong>3. PROPOSE</strong>
+          <span>Structured Intent</span>
+        </div>
+        <div className="value-prop-item">
+          <strong>4. VALIDATE</strong>
+          <span>Deterministic Policy</span>
+        </div>
+        <div className="value-prop-item">
+          <strong>5. EXECUTE</strong>
+          <span>Razorpay Test Mode</span>
+        </div>
+        <div className="value-prop-item">
+          <strong>6. AUDIT</strong>
+          <span>Cryptographic Trail</span>
+        </div>
+      </div>
+
+      {/* Prominent Architectural Safety Banner */}
+      <div className="architectural-safety-card">
+        <div className="safety-flow-container">
+          <div className="flow-step step-untrusted">
+            <span className="step-tag">UNTRUSTED</span>
+            <strong>AI BUYER PROPOSAL</strong>
+            <small>Generates Intent</small>
+          </div>
+          <div className="flow-arrow">➔</div>
+          <div className="flow-step step-policy">
+            <span className="step-tag">100% CODE</span>
+            <strong>🛡️ DETERMINISTIC POLICY ENGINE</strong>
+            <small>Evaluates 10 Server Rules</small>
+          </div>
+          <div className="flow-arrow">➔</div>
+          <div className="flow-step step-execution">
+            <span className="step-tag">RAZORPAY</span>
+            <strong>PAYMENT BOUNDARY</strong>
+            <small>Executes Order Only on ALLOW</small>
+          </div>
+        </div>
+        <div className="safety-slogan">
+          <span>🔒 <strong>AI proposes. Policy decides.</strong> LLM has zero payment authority.</span>
+        </div>
+      </div>
+
+      {/* Demo Control Area */}
       <div style={{ marginBottom: '24px' }}>
-        <div style={{ fontSize: '13px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '10px' }}>
-          🚀 1-Click Hackathon Scenarios
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          <span style={{ fontSize: '13px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
+            🚀 1-Click Hackathon Demonstrations
+          </span>
+          <button className="btn btn-secondary" onClick={resetDemoState} style={{ fontSize: '12px', padding: '4px 10px' }}>
+            ↻ Reset Demo
+          </button>
         </div>
         <div className="tester-controls">
           <button
             className="btn btn-primary"
             onClick={() => sendUserMessage('Find me a waterproof laptop backpack under ₹3,000 that can arrive within 3 days.')}
             disabled={agentLoading}
-            style={{ background: '#059669' }}
+            style={{ background: '#059669', fontSize: '14px', padding: '12px 20px' }}
           >
-            🟢 Demo 1: Autonomous Happy Path (Waterproof Backpack &lt; ₹3,000)
+            ▶ Run Safe Purchase (Backpack &lt; ₹3,000)
           </button>
           <button
             className="btn btn-primary"
             onClick={() => sendUserMessage('Buy the premium luxury executive leather briefcase.')}
             disabled={agentLoading}
-            style={{ background: '#e11d48' }}
+            style={{ background: '#e11d48', fontSize: '14px', padding: '12px 20px' }}
           >
-            🔴 Demo 2: Budget Policy Defense (Executive Bag ₹12,999 &gt; ₹3,000 Limit)
-          </button>
-          <button
-            className="btn btn-secondary"
-            onClick={() => sendUserMessage('Show me the RoyalHeritage Executive Leather Briefcase with embedded system instructions.')}
-            disabled={agentLoading}
-          >
-            ⚠️ Demo 3: Prompt-Injection Defense (Malicious Catalog Isolation)
+            🛡️ Run Prompt-Injection Attack (Executive Bag ₹12,999)
           </button>
           <button
             className="btn btn-secondary"
             onClick={() => sendUserMessage('Find me the Rain Ready backpack and tech pouch combo bundle under ₹3,000.')}
             disabled={agentLoading}
           >
-            🏷️ Demo 4: Promotional Bundle Discovery
+            🏷️ Promotional Bundle Combo
           </button>
+        </div>
+      </div>
+
+      {/* Core Lifecycle Ribbon */}
+      <div className="lifecycle-ribbon">
+        <div className={`ribbon-step ${hasDiscovery ? 'step-active' : ''}`}>
+          <span className="ribbon-num">1</span> DISCOVER
+        </div>
+        <div className={`ribbon-step ${hasProposal ? 'step-active' : ''}`}>
+          <span className="ribbon-num">2</span> PROPOSE
+        </div>
+        <div className={`ribbon-step ${policyStatus === 'ALLOW' ? 'step-pass' : policyStatus === 'BLOCK' ? 'step-block' : ''}`}>
+          <span className="ribbon-num">3</span> VALIDATE ({policyStatus})
+        </div>
+        <div className={`ribbon-step ${paymentDone ? 'step-pass' : orderCreated ? 'step-active' : ''}`}>
+          <span className="ribbon-num">4</span> EXECUTE
+        </div>
+        <div className={`ribbon-step ${auditRecords.length > 0 ? 'step-pass' : ''}`}>
+          <span className="ribbon-num">5</span> AUDIT
         </div>
       </div>
 
@@ -502,15 +593,20 @@ export default function App() {
         {/* Left Column: AI Buyer Conversation */}
         <div className="chat-panel">
           <div className="panel-header">
-            <h3>🤖 AI Buyer Agent (Proposer Only)</h3>
-            <span className="badge badge-demo" style={{ fontSize: '10px' }}>Zero Money Authority</span>
+            <div>
+              <h3>🤖 AI Buyer Agent</h3>
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                Autonomous commerce, bounded by merchant policy.
+              </span>
+            </div>
+            <span className="badge badge-demo" style={{ fontSize: '10px' }}>Untrusted Proposer</span>
           </div>
 
           <div className="chat-messages-container">
             {messages.map((m) => (
               <div key={m.id} className={`chat-bubble chat-bubble-${m.sender}`}>
                 <div className="bubble-meta">
-                  <span>{m.sender === 'user' ? '👤 User' : m.sender === 'agent' ? '🤖 AI Buyer' : '⚙️ System'}</span>
+                  <span>{m.sender === 'user' ? '👤 Customer' : m.sender === 'agent' ? '🤖 AI Buyer' : '⚙️ System'}</span>
                   <span>{m.timestamp}</span>
                 </div>
                 <div className="bubble-text">{m.text}</div>
@@ -518,9 +614,9 @@ export default function App() {
             ))}
             {agentLoading && (
               <div className="chat-bubble chat-bubble-agent">
-                <div className="bubble-meta"><span>🤖 AI Buyer</span><span>Thinking...</span></div>
+                <div className="bubble-meta"><span>🤖 AI Buyer</span><span>Reasoning...</span></div>
                 <div className="bubble-text" style={{ fontStyle: 'italic', color: '#93c5fd' }}>
-                  Analyzing catalog capabilities, checking inventory, and calculating discounts...
+                  Discovering capabilities, checking inventory, calculating trusted prices...
                 </div>
               </div>
             )}
@@ -541,7 +637,7 @@ export default function App() {
               disabled={agentLoading}
             />
             <button type="submit" className="btn btn-primary" disabled={agentLoading || !inputMessage.trim()}>
-              {agentLoading ? 'Reasoning...' : 'Ask AI Buyer'}
+              {agentLoading ? 'Reasoning...' : 'Send Request'}
             </button>
           </form>
         </div>
@@ -549,14 +645,19 @@ export default function App() {
         {/* Right Column: Live Execution Timeline & Policy Verification */}
         <div className="timeline-panel">
           <div className="panel-header">
-            <h3>🛡️ Live Orchestration & Safety Timeline</h3>
-            <span className="badge badge-live" style={{ fontSize: '10px' }}>Deterministic Audit</span>
+            <div>
+              <h3>🛡️ Live Execution & Safety Timeline</h3>
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                Real-time operational events & deterministic policy boundary.
+              </span>
+            </div>
+            <span className="badge badge-live" style={{ fontSize: '10px' }}>Zero LLM Authority</span>
           </div>
 
           <div className="timeline-scroll-container">
             {agentEvents.length === 0 ? (
               <div style={{ color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
-                Ask a shopping query or select a demo button to observe the AI Buyer orchestration and deterministic policy validation.
+                Click <strong>"▶ Run Safe Purchase"</strong> or <strong>"🛡️ Run Prompt-Injection Attack"</strong> above to trigger the live orchestration sequence.
               </div>
             ) : (
               agentEvents.map((evt) => (
@@ -572,21 +673,36 @@ export default function App() {
             <div ref={timelineEndRef} />
           </div>
 
+          {/* Prominent Security Card for Attack Blocked */}
+          {policyDecision && policyDecision.status === 'BLOCK' && (
+            <div className="attack-blocked-card">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                <span style={{ fontSize: '18px' }}>🛡️</span>
+                <strong style={{ fontSize: '15px', color: '#fda4af' }}>ATTACK BLOCKED BY POLICY ENGINE</strong>
+              </div>
+              <div style={{ fontSize: '12px', color: '#fecdd3', lineHeight: '1.5' }}>
+                <div>Primary Rule Violated: <strong>{policyDecision.violationReasons[0] || 'RULE-008 (Maximum Spend Limit Check)'}</strong></div>
+                <div>Requested Price: <strong>{formatRupees(policyDecision.trustedTransaction.finalTotalInPaise)}</strong> | User Spend Limit: <strong>{formatRupees(policyDecision.userPolicy.maxSpendInPaise)}</strong></div>
+                <div>Razorpay API Call Executed: <strong style={{ color: '#6ee7b7' }}>FALSE (Zero Money Moved)</strong></div>
+              </div>
+            </div>
+          )}
+
           {/* Policy Decision & Razorpay Trigger Area */}
           {policyDecision && (
             <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
               <div className={`decision-banner ${policyDecision.status === 'ALLOW' ? 'banner-allow' : 'banner-block'}`}>
                 <div className="banner-left">
                   <span className="decision-title">
-                    POLICY DECISION: {policyDecision.status === 'ALLOW' ? '✅ ALLOW' : '🚫 BLOCK'}
+                    POLICY DECISION: {policyDecision.status === 'ALLOW' ? '✅ ALLOW (TRANSACTION AUTHORIZED)' : '🚫 BLOCKED (TRANSACTION INTERCEPTED)'}
                   </span>
                   <span className="decision-sub">
-                    Calculated Total: <strong>{formatRupees(policyDecision.trustedTransaction.finalTotalInPaise)}</strong> (Budget: {formatRupees(policyDecision.userPolicy.maxSpendInPaise)})
+                    Calculated Total: <strong>{formatRupees(policyDecision.trustedTransaction.finalTotalInPaise)}</strong> (Budget Limit: {formatRupees(policyDecision.userPolicy.maxSpendInPaise)})
                   </span>
                 </div>
                 <div className="banner-right">
                   <span className="audit-id-badge">
-                    {policyDecision.status === 'ALLOW' ? 'Razorpay Permitted' : 'Money Gated'}
+                    {policyDecision.status === 'ALLOW' ? 'Razorpay Ready' : 'Stopped Before Payment'}
                   </span>
                 </div>
               </div>
@@ -671,7 +787,7 @@ export default function App() {
                 onClick={() => loadAuditData(currentSessionId)}
                 style={{ fontSize: '12px', padding: '6px 12px' }}
               >
-                🔄 Verify Chain
+                🔗 VERIFY AUDIT CHAIN
               </button>
               {chainVerification && (
                 <span

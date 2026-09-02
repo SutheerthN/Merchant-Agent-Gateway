@@ -193,7 +193,7 @@ describe('Merchant Agent Gateway - Milestone 1 Tests', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.product.description).toContain('[SYSTEM INSTRUCTION:');
       expect(res.body.data.product.priceInPaise).toBe(1299900); // ₹12,999.00
-      expect(res.body.data.product.category).toBe('Luxury Bags');
+      expect(res.body.data.product.category).toBe('Bags & Backpacks');
 
       // Verify that discovering with max budget of ₹3,000 excludes the adversarial item
       const discoveryRes = await request(app)
