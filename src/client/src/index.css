@@ -420,6 +420,158 @@ body {
   max-height: 260px;
 }
 
+/* Policy Inspector Card */
+.policy-results-card {
+  margin-top: 18px;
+  background: #090c13;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  padding: 20px;
+}
+
+.decision-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+}
+
+.banner-allow {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #6ee7b7;
+}
+
+.banner-block {
+  background: rgba(244, 63, 94, 0.15);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  color: #fda4af;
+}
+
+.decision-title {
+  font-size: 16px;
+  font-weight: 800;
+  display: block;
+}
+
+.decision-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.audit-id-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.policy-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.metric-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-lbl {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.metric-val {
+  font-size: 15px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.rules-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.rule-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.rule-pass {
+  border-left: 3px solid var(--accent-green);
+}
+
+.rule-fail {
+  border-left: 3px solid var(--accent-rose);
+  background: rgba(244, 63, 94, 0.05);
+}
+
+.rule-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.rule-pass .rule-badge {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+.rule-fail .rule-badge {
+  background: rgba(244, 63, 94, 0.25);
+  color: #fb7185;
+}
+
+.rule-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.rule-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rule-reason {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.violation-box {
+  background: rgba(244, 63, 94, 0.1);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  border-radius: 8px;
+  padding: 14px;
+  font-size: 13px;
+  color: #fecdd3;
+}
+
+.violation-box ul {
+  margin-top: 6px;
+  padding-left: 20px;
+}
+
 /* Roadmap Notice */
 .roadmap-banner {
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(56, 189, 248, 0.05));

@@ -11,7 +11,7 @@ healthRouter.get('/', (_req: Request, res: Response) => {
     version: manifest.gatewayVersion,
     mode: 'TEST / DEMO',
     paymentIntegration: 'INACTIVE (Milestone 3 Pending)',
-    policyEngine: 'INITIALIZED_TYPES_ONLY (Milestone 2 Pending)',
+    policyEngine: 'DETERMINISTIC_ACTIVE (10 Rules Enforced)',
     activeCapabilities: manifest.capabilities.map((c) => c.name),
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),

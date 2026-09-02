@@ -6,6 +6,7 @@ import {
   VerifyInventorySchema,
   CheckPriceSchema,
   BuildBundleSchema,
+  ValidatePolicySchema,
 } from '../capabilities/schemas.js';
 
 export const capabilitiesRouter = Router();
@@ -95,3 +96,18 @@ capabilitiesRouter.post('/build_bundle', (req: Request, res: Response, next: Nex
     next(error);
   }
 });
+
+// POST /api/capabilities/validate_policy
+capabilitiesRouter.post('/validate_policy', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const validated = ValidatePolicySchema.parse(req.body);
+    const decision = CapabilityService.validatePolicy(validated);
+    res.json({
+      status: 'success',
+      data: decision,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+

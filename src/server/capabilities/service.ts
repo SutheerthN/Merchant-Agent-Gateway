@@ -10,7 +10,10 @@ import {
   VerifyInventoryInput,
   CheckPriceInput,
   BuildBundleInput,
+  ValidatePolicyInput,
 } from './schemas.js';
+import { PurchaseProposal } from '../types/policy.js';
+import { DeterministicPolicyEngine } from '../policy/engine.js';
 
 export interface CapabilityManifest {
   gatewayVersion: string;
@@ -107,6 +110,28 @@ export class CapabilityService {
           outputSchema: {
             eligibleBundles: 'BundleRule[]',
             potentialSavingsInPaise: 'number',
+          },
+        },
+        {
+          name: 'VALIDATE_POLICY',
+          description: 'Deterministically validates an AI purchase proposal against trusted server catalog facts and user authorization policies.',
+          endpoint: '/api/capabilities/validate_policy',
+          httpMethod: 'POST',
+          inputSchema: {
+            merchantId: 'string (optional)',
+            sessionId: 'string (optional)',
+            items: 'Array<{ sku: string, quantity: number, claimedPriceInPaise?: number }>',
+            bundleId: 'string (optional)',
+            userAuth: 'UserAuthorizationPolicy (optional overrides)',
+          },
+          outputSchema: {
+            status: 'ALLOW | BLOCK',
+            decisionId: 'string',
+            auditEventId: 'string',
+            trustedTransaction: 'TrustedTransaction',
+            ruleResults: 'RuleEvaluationResult[]',
+            violationReasons: 'string[]',
+            razorpayCallExecuted: 'false',
           },
         },
       ],
@@ -276,4 +301,17 @@ export class CapabilityService {
       potentialSavingsInPaise,
     };
   }
+
+  public static validatePolicy(input: ValidatePolicyInput) {
+    const proposal: PurchaseProposal = {
+      merchantId: input.merchantId || 'merchant_aero_gear_in',
+      sessionId: input.sessionId || `sess_${Date.now()}`,
+      items: input.items,
+      bundleId: input.bundleId,
+      applyEligibleBundles: input.applyEligibleBundles,
+    };
+
+    return DeterministicPolicyEngine.evaluate(proposal, input.userAuth);
+  }
 }
+

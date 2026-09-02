@@ -25,7 +25,7 @@ describe('Merchant Agent Gateway - Milestone 1 Tests', () => {
       expect(res.status).toBe(200);
       expect(res.body.status).toBe('success');
       expect(res.body.data.gatewayVersion).toBe('0.1.0');
-      expect(res.body.data.capabilities).toHaveLength(5);
+      expect(res.body.data.capabilities).toHaveLength(6);
 
       const capNames = res.body.data.capabilities.map((c: any) => c.name);
       expect(capNames).toEqual([
@@ -34,6 +34,7 @@ describe('Merchant Agent Gateway - Milestone 1 Tests', () => {
         'VERIFY_INVENTORY',
         'CHECK_PRICE',
         'BUILD_BUNDLE',
+        'VALIDATE_POLICY',
       ]);
     });
   });

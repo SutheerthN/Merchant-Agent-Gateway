@@ -46,3 +46,33 @@ export const BuildBundleSchema = z.object({
 });
 
 export type BuildBundleInput = z.infer<typeof BuildBundleSchema>;
+
+export const ValidatePolicySchema = z.object({
+  merchantId: z.string().optional().default('merchant_aero_gear_in'),
+  sessionId: z.string().optional(),
+  items: z.array(
+    z.object({
+      sku: z.string().min(1, 'SKU is required'),
+      quantity: z.number().int().positive('Quantity must be a positive integer'),
+      claimedPriceInPaise: z.number().optional(),
+      claimedTotalInPaise: z.number().optional(),
+    })
+  ).min(1, 'At least one item is required in proposal'),
+  bundleId: z.string().optional(),
+  applyEligibleBundles: z.boolean().optional().default(true),
+  userAuth: z
+    .object({
+      maxSpendInPaise: z.number().positive().optional(),
+      allowedCurrencies: z.array(z.string()).optional(),
+      allowedCategories: z.array(z.string()).optional(),
+      maxDeliveryDays: z.number().int().positive().optional(),
+      requireInStock: z.boolean().optional(),
+      maxQuantityPerSku: z.number().int().positive().optional(),
+      requireExplicitApproval: z.boolean().optional(),
+      hasUserApproval: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+export type ValidatePolicyInput = z.infer<typeof ValidatePolicySchema>;
+
